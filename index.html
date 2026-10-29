@@ -611,6 +611,7 @@ const SND=(()=>{
   }
   const SCALE=[110,123.47,130.81,146.83,164.81,174.61,196,220,246.94,261.63];
   function melody(){
+    if(api.musicOn)return;
     if(!ctx||!on||ctx.state!=='running')return;
     if(Math.random()<.38)return;
     step=Math.max(0,Math.min(SCALE.length-1,step+[-2,-1,-1,0,1,1,2][Math.floor(Math.random()*7)]));
@@ -697,8 +698,34 @@ const SND=(()=>{
 const startAudio=()=>SND.init();
 document.addEventListener('pointerdown',startAudio,{capture:true});
 document.addEventListener('keydown',startAudio,{capture:true});
+const MUSIC={menu:'music/menu.mp3',map1:'music/map1.mp3',map2:'music/map2.mp3',map3:'music/map3.mp3'};
+const MUS=(()=>{
+  const els={},VOL=.55;let cur=null,started=false,timer=null;
+  const el=k=>{if(!els[k]){const a=new Audio();a.src=MUSIC[k];a.loop=true;a.preload='auto';a.volume=0;a.addEventListener('error',()=>{a.dead=true});els[k]=a}return els[k]};
+  const want=()=>scene==='menu'||scene==='intro'?'menu':S.base==='anna'?'map2':S.base==='tyumen'?'map3':'map1';
+  const play=a=>{if(a.dead)return;try{const p=a.play();if(p&&p.catch)p.catch(()=>{})}catch(e){}};
+  function fadeStep(){
+    let moving=false;
+    for(const k in els){const a=els[k],tgt=(k===cur&&SND.isOn()&&!document.hidden)?VOL:0;
+      const d=tgt-a.volume;if(Math.abs(d)>.001){a.volume=Math.max(0,Math.min(1,a.volume+Math.sign(d)*Math.min(.03,Math.abs(d))));moving=true}
+      if(tgt===0&&a.volume<=.001&&!a.paused)a.pause()}
+    if(!moving){clearInterval(timer);timer=null}
+  }
+  function update(){
+    if(!started)return;const k=want();
+    if(k!==cur)cur=k;
+    const a=el(cur);if(SND.isOn()&&!document.hidden&&a.paused)play(a);
+    SND.musicOn=!a.dead&&SND.isOn();
+    if(!timer)timer=setInterval(fadeStep,50);
+  }
+  function start(){if(started)return;started=true;update()}
+  ['pointerdown','keydown','touchstart'].forEach(ev=>addEventListener(ev,start,{passive:true}));
+  document.addEventListener('visibilitychange',update);
+  setInterval(update,400);
+  return{update,get cur(){return cur},els};
+})();
 function syncSoundBtn(){const o=SND.isOn();$('btnSound').classList.toggle('off',!o);$('btnSound').setAttribute('aria-pressed',String(o));$('sndWaves').style.display=o?'':'none';$('sndX').style.display=o?'none':''}
-$('btnSound').addEventListener('click',()=>{SND.toggle();syncSoundBtn();SND.click()});
+$('btnSound').addEventListener('click',()=>{SND.toggle();syncSoundBtn();SND.click();MUS.update()});
 syncSoundBtn();
 
 /* =====================================================================
@@ -3141,6 +3168,7 @@ function floatText(txt,col='#a9c48f',x=vlad.x,y=vlad.y-112-floaters.length*16){f
 
 let dTimer=null;
 function say(text,who=T_('Влад'),lock=false,ms=3800){
+  text=tx(text,LANG);who=tx(who,LANG);
   $('dWho').textContent=who;$('dWho').className='who'+(lock?' lock':'');$('dTxt').textContent=text;$('dialog').hidden=false;
   clearTimeout(dTimer);dTimer=setTimeout(()=>{$('dialog').hidden=true},ms);
 }
@@ -3149,7 +3177,7 @@ function say(text,who=T_('Влад'),lock=false,ms=3800){
 let story=null;
 function playStory(lines,done){story={lines,i:0,done};busy=true;$('dialog').hidden=true;$('storyModal').hidden=false;showLine();setTimeout(()=>$('stNext').focus(),0)}
 function showLine(){
-  const [who,txt,cls]=story.lines[story.i];
+  let [who,txt,cls]=story.lines[story.i];who=tx(who,LANG);txt=tx(txt,LANG);
   $('stWho').textContent=who;$('stWho').className='who'+(who===T_('Влад')?' vlad':who===''?' note':'');
   $('stTxt').textContent=txt;$('stTxt').className=cls||'';
   $('stCount').textContent=`${story.i+1} / ${story.lines.length}`;
@@ -5076,14 +5104,14 @@ function runIntro(){
     show('intro');introDone=false;for(const [id] of introLines)$(id).textContent='';
     let li=0,ci=0;clearInterval(typing);
     typing=setInterval(()=>{
-      const [id,txt]=introLines[li];$(id).textContent=txt.slice(0,++ci);
+      const id=introLines[li][0],txt=tx(introLines[li][1],LANG);$(id).textContent=txt.slice(0,++ci);
       if(txt[ci-1]!==' '&&ci%2)SND.type();
       if(ci>=txt.length){li++;ci=0;if(li>=introLines.length){clearInterval(typing);introDone=true}}
     },42);
   });
 }
 $('intro').addEventListener('click',()=>{
-  if(!introDone){clearInterval(typing);for(const [id,txt] of introLines)$(id).textContent=txt;introDone=true;return}
+  if(!introDone){clearInterval(typing);for(const [id,txt] of introLines)$(id).textContent=tx(txt,LANG);introDone=true;return}
   SND.click();fadeTo(startGame);
 });
 function startGame(){
