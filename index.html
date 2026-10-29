@@ -54,6 +54,7 @@ body{
   .stage{width:100%;box-shadow:none}
 }
 body.rot #ext{display:none}
+.in-app #btnFull{display:none}
 body.rot{display:block;padding:0}
 body.rot .stage{
   position:fixed;left:50%;top:50%;max-width:none;
@@ -664,6 +665,8 @@ const SND=(()=>{
   api.scene=function(s){scene=s;mix()};
   api.toggle=function(){on=!on;try{localStorage.setItem('nv2030_sound',on?'1':'0')}catch(e){}if(ctx)master.gain.setTargetAtTime(on?1:0,ctx.currentTime,.1);return on};
   api.isOn=()=>on;
+  api.suspend=()=>{try{if(ctx&&ctx.state==='running')ctx.suspend()}catch(e){}};
+  api.resume=()=>{try{if(ctx&&ctx.state==='suspended')ctx.resume()}catch(e){}};
   const ok=()=>ctx&&on&&ctx.state==='running';
   api.click=()=>{if(!ok())return;tone('square',820,620,.04,.04,0,['lowpass',2400])};
   api.type=()=>{if(!ok())return;noise(.018,.05,'highpass',2500,.7);tone('square',140,90,.02,.02)};
@@ -699,6 +702,7 @@ const startAudio=()=>SND.init();
 document.addEventListener('pointerdown',startAudio,{capture:true});
 document.addEventListener('keydown',startAudio,{capture:true});
 const MUSIC={menu:'music/menu.mp3',map1:'music/map1.mp3',map2:'music/map2.mp3',map3:'music/map3.mp3'};
+let APP_PAUSED=false;
 const MUS=(()=>{
   const els={},VOL=.55;let cur=null,started=false,timer=null;
   const el=k=>{if(!els[k]){const a=new Audio();a.src=MUSIC[k];a.loop=true;a.preload='auto';a.volume=0;a.addEventListener('error',()=>{a.dead=true});els[k]=a}return els[k]};
@@ -706,7 +710,7 @@ const MUS=(()=>{
   const play=a=>{if(a.dead)return;try{const p=a.play();if(p&&p.catch)p.catch(()=>{})}catch(e){}};
   function fadeStep(){
     let moving=false;
-    for(const k in els){const a=els[k],tgt=(k===cur&&SND.isOn()&&!document.hidden)?VOL:0;
+    for(const k in els){const a=els[k],tgt=(k===cur&&SND.isOn()&&!document.hidden&&!APP_PAUSED)?VOL:0;
       const d=tgt-a.volume;if(Math.abs(d)>.001){a.volume=Math.max(0,Math.min(1,a.volume+Math.sign(d)*Math.min(.03,Math.abs(d))));moving=true}
       if(tgt===0&&a.volume<=.001&&!a.paused)a.pause()}
     if(!moving){clearInterval(timer);timer=null}
@@ -714,7 +718,7 @@ const MUS=(()=>{
   function update(){
     if(!started)return;const k=want();
     if(k!==cur)cur=k;
-    const a=el(cur);if(SND.isOn()&&!document.hidden&&a.paused)play(a);
+    const a=el(cur);if(SND.isOn()&&!document.hidden&&!APP_PAUSED&&a.paused)play(a);
     SND.musicOn=!a.dead&&SND.isOn();
     if(!timer)timer=setInterval(fadeStep,50);
   }
@@ -722,8 +726,26 @@ const MUS=(()=>{
   ['pointerdown','keydown','touchstart'].forEach(ev=>addEventListener(ev,start,{passive:true}));
   document.addEventListener('visibilitychange',update);
   setInterval(update,400);
-  return{update,get cur(){return cur},els};
+  function pauseNow(){for(const k in els){els[k].volume=0;if(!els[k].paused)els[k].pause()}}
+  return{update,pauseNow,get cur(){return cur},els};
 })();
+const IN_APP=/VN2030App/.test(navigator.userAgent);
+if(IN_APP)document.documentElement.classList.add('in-app');
+window.__appPause=()=>{APP_PAUSED=true;MUS.pauseNow();SND.suspend();return'ok'};
+window.__appResume=()=>{APP_PAUSED=false;SND.resume();MUS.update();return'ok'};
+window.__appBack=()=>{
+  const vis=id=>{const e=$(id);return e&&!e.hidden};
+  if(vis('tutModal')){$('tutOk').click();return'ok'}
+  if(vis('sysModal')){$('sysClose').click();return'ok'}
+  if(vis('pickModal')&&!$('pickClose').hidden){$('pickClose').click();return'ok'}
+  if(vis('invModal')){$('invClose').click();return'ok'}
+  if(vis('actModal')){if(!$('aClose').hidden)$('aClose').click();return'ok'}
+  if(vis('storyModal')||F)return'ok';
+  if(scene==='map'){if(!$('locPanel').hidden){$('locClose').click()}else $('btnBack').click();return'ok'}
+  if(scene==='game'){if(!busy)$('btnMenu').click();return'ok'}
+  if(scene==='intro')return'ok';
+  return'exit';
+};
 function syncSoundBtn(){const o=SND.isOn();$('btnSound').classList.toggle('off',!o);$('btnSound').setAttribute('aria-pressed',String(o));$('sndWaves').style.display=o?'':'none';$('sndX').style.display=o?'none':''}
 $('btnSound').addEventListener('click',()=>{SND.toggle();syncSoundBtn();SND.click();MUS.update()});
 syncSoundBtn();
